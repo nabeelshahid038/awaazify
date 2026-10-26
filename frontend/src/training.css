@@ -1,0 +1,136 @@
+.training-stack {
+  display: grid;
+  gap: 1.2rem;
+  margin-top: 1.2rem;
+}
+.training-card {
+  padding: 1.35rem;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: #fff;
+}
+.training-card h2 {
+  margin: 0.35rem 0;
+}
+.training-card > div > p {
+  color: var(--muted);
+  max-width: 760px;
+}
+.training-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin: 1rem 0;
+}
+.training-grid label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 650;
+}
+.training-grid input,
+.training-grid select {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.78rem;
+  font: inherit;
+  background: #fff;
+}
+.upload-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+.training-drop {
+  display: grid;
+  place-items: center;
+  text-align: center;
+  gap: 0.25rem;
+  padding: 1.2rem;
+  border: 1px dashed #aaa;
+  border-radius: 14px;
+  cursor: pointer;
+}
+.training-drop span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.training-drop input {
+  display: none;
+}
+.training-row,
+.training-admin-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--border);
+}
+.training-row > span {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #f2efe8;
+}
+.training-row > div,
+.training-admin-row > div:first-child {
+  display: grid;
+  flex: 1;
+}
+.training-row small,
+.training-admin-row small {
+  color: var(--muted);
+}
+.training-status {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  padding: 0.4rem 0.6rem;
+  border-radius: 999px;
+  background: #eee;
+}
+.training-status.ready {
+  background: #daf3e3;
+  color: #17683a;
+}
+.training-status.rejected {
+  background: #f9dede;
+  color: #942e2e;
+}
+.training-status.training,
+.training-status.model_validation {
+  background: #e5ebff;
+  color: #3450a2;
+}
+.training-admin-row > div:last-child {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.training-admin-row button {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 9px;
+  padding: 0.55rem 0.7rem;
+  cursor: pointer;
+}
+.training-admin-row button.danger {
+  color: #a62f2f;
+}
+@media (max-width: 760px) {
+  .training-grid,
+  .upload-pair {
+    grid-template-columns: 1fr;
+  }
+  .training-admin-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .training-admin-row > div:last-child {
+    width: 100%;
+  }
+}
+.training-price{display:grid!important;grid-template-columns:1fr 1fr;gap:.75rem;margin:1rem 0}.training-price>div{display:grid;gap:.25rem;padding:1rem;border-radius:14px;background:#f2efff;color:#6246dc}.training-price small{font-size:.7rem;font-weight:800}.training-price strong{font-size:1.05rem}@media(max-width:760px){.training-price{grid-template-columns:1fr}}

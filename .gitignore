@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.production
+.env.local
+.env.*.local
+!.env.example
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+*.egg-info/
+*.tsbuildinfo
+.ruff_cache/
+.wrangler/
+.coverage
+.DS_Store
