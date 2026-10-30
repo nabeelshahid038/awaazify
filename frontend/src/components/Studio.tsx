@@ -4,8 +4,10 @@ import {
   CloudUpload,
   Download,
   FileAudio,
+  Headphones,
   LoaderCircle,
   Play,
+  X,
   Youtube,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
@@ -17,6 +19,8 @@ import {
   fetchStudioProjects,
   fetchYoutubeMetadata,
   retryGenerationJob,
+  selectSongPitch,
+  type FinalArtifacts,
   type GenerationJob,
   type StudioProject,
   type YoutubeMetadata,
@@ -92,6 +96,9 @@ export default function Studio({
   const [projects, setProjects] = useState<StudioProject[]>([]);
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [startingProject, setStartingProject] = useState<string | null>(null);
+  const [variantModal, setVariantModal] = useState<{jobId:string;title:string;files:FinalArtifacts}|null>(null);
+  const [selectedPitch, setSelectedPitch] = useState<-3|0|3>(0);
+  const openedCompleted = useRef(new Set<string>());
   const objectUrl = useRef<string | null>(null);
 
   useEffect(() => {
@@ -99,7 +106,10 @@ export default function Studio({
       .then(setProjects)
       .catch(() => {});
     fetchGenerationJobs(token)
-      .then(setJobs)
+      .then((items) => {
+        items.filter((item) => item.status === "completed").forEach((item) => openedCompleted.current.add(item.id));
+        setJobs(items);
+      })
       .catch(() => {});
   }, [token]);
   useEffect(() => {
@@ -128,6 +138,19 @@ export default function Studio({
     );
     return () => window.clearInterval(timer);
   }, [jobs, token]);
+  useEffect(() => {
+    const completed = jobs.find((job) => job.status === "completed" && !openedCompleted.current.has(job.id));
+    if (!completed) return;
+    const project = projects.find((item) => item.id === completed.project_id);
+    if (!project) return;
+    openedCompleted.current.add(completed.id);
+    fetchFinalArtifacts(token, completed.id)
+      .then((files) => {
+        setSelectedPitch(files.selected_pitch);
+        setVariantModal({jobId: completed.id, title: project.title, files});
+      })
+      .catch(() => {});
+  }, [jobs, projects, token]);
   useEffect(
     () => () => {
       if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
@@ -319,21 +342,17 @@ export default function Studio({
       setStartingProject(null);
     }
   }
-  async function downloadSong(jobId: string, title: string) {
-    resetFeedback();
-    setStartingProject(jobId);
-    try {
-      const artifacts = await fetchFinalArtifacts(token, jobId);
-      await downloadFile(artifacts.mp3_url, title);
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Unable to authorize the final download",
-      );
-    } finally {
-      setStartingProject(null);
-    }
+  async function openVersions(jobId:string,title:string){
+    resetFeedback();setStartingProject(jobId);
+    try{const files=await fetchFinalArtifacts(token,jobId);setSelectedPitch(files.selected_pitch);setVariantModal({jobId,title,files});}
+    catch(e){setError(e instanceof Error?e.message:"Unable to load song versions");}
+    finally{setStartingProject(null);}
+  }
+  async function chooseVersion(pitch:-3|0|3){
+    if(!variantModal)return;setStartingProject(variantModal.jobId);
+    try{await selectSongPitch(token,variantModal.jobId,pitch);setSelectedPitch(pitch);setMessage(`${pitch===0?'Default':pitch<0?'Deep (-3)':'High (+3)'} version selected. You can change it later in My Songs.`);}
+    catch(e){setError(e instanceof Error?e.message:"Unable to save selected version");}
+    finally{setStartingProject(null);}
   }
   const ready = mode === "youtube" ? Boolean(metadata) : Boolean(file);
   return (
@@ -578,14 +597,14 @@ export default function Studio({
                   <button
                     className="prepare-button"
                     disabled={startingProject === job.id}
-                    onClick={() => downloadSong(job.id, p.title)}
+                    onClick={() => openVersions(job.id, p.title)}
                   >
                     {startingProject === job.id ? (
                       <LoaderCircle className="spin" size={15} />
                     ) : (
                       <Download size={15} />
                     )}{" "}
-                    Download MP3
+                    Choose version
                   </button>
                 ) : (
                   <span className="status status-online">
@@ -600,6 +619,7 @@ export default function Studio({
           })
         )}
       </section>
+      {variantModal&&<div className="pitch-modal-backdrop" role="presentation" onMouseDown={(e)=>{if(e.target===e.currentTarget)setVariantModal(null)}}><section className="pitch-modal" role="dialog" aria-modal="true" aria-labelledby="pitch-title"><button className="pitch-close" onClick={()=>setVariantModal(null)} aria-label="Close"><X/></button><span className="pitch-kicker"><Headphones size={16}/> YOUR COVER IS READY</span><h2 id="pitch-title">Choose the version you like</h2><p>{variantModal.title}</p><div className="pitch-options">{variantModal.files.variants.map((variant)=><article className={selectedPitch===variant.pitch?"selected":""} key={variant.pitch}><div><strong>{variant.label}</strong><span>{variant.pitch>0?`+${variant.pitch}`:variant.pitch} pitch</span></div><audio controls preload="metadata" src={variant.mp3_url}/><div className="pitch-actions"><button onClick={()=>chooseVersion(variant.pitch)} disabled={startingProject===variantModal.jobId}>{selectedPitch===variant.pitch?"Selected":"Use this version"}</button><button className="pitch-download" onClick={()=>downloadFile(variant.mp3_url,`${variantModal.title}-${variant.label.toLowerCase()}`)}><Download size={15}/> MP3</button></div></article>)}</div><small>All three versions stay private in My Songs. This generation uses one song credit.</small></section></div>}
     </div>
   );
 }

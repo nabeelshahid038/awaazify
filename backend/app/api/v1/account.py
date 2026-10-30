@@ -32,7 +32,7 @@ async def delete_song(job_id: str, identity: Annotated[dict, Depends(current_use
             params={
                 "id": f"eq.{job_id}", "user_id": f"eq.{user_id}",
                 "status": "in.(completed,failed)",
-                "select": "id,project_id,vocals_storage_path,instrumental_storage_path,converted_vocals_storage_path,normalized_storage_path,final_wav_storage_path,final_mp3_storage_path,studio_projects(storage_path)",
+                "select": "id,project_id,vocals_storage_path,instrumental_storage_path,converted_vocals_storage_path,converted_vocals_minus5_storage_path,converted_vocals_plus5_storage_path,converted_vocals_minus3_storage_path,converted_vocals_plus3_storage_path,normalized_storage_path,final_wav_storage_path,final_mp3_storage_path,final_mp3_minus5_storage_path,final_mp3_plus5_storage_path,final_mp3_minus3_storage_path,final_mp3_plus3_storage_path,studio_projects(storage_path)",
             },
         )
         if result.status_code != 200 or not result.json():
@@ -40,7 +40,7 @@ async def delete_song(job_id: str, identity: Annotated[dict, Depends(current_use
         row = result.json()[0]
         project = row.get("studio_projects") or {}
         await delete_object(client, "source-audio", project.get("storage_path"))
-        for field in ("vocals_storage_path", "instrumental_storage_path", "converted_vocals_storage_path", "normalized_storage_path", "final_wav_storage_path", "final_mp3_storage_path"):
+        for field in ("vocals_storage_path", "instrumental_storage_path", "converted_vocals_storage_path", "converted_vocals_minus5_storage_path", "converted_vocals_plus5_storage_path", "converted_vocals_minus3_storage_path", "converted_vocals_plus3_storage_path", "normalized_storage_path", "final_wav_storage_path", "final_mp3_storage_path", "final_mp3_minus5_storage_path", "final_mp3_plus5_storage_path", "final_mp3_minus3_storage_path", "final_mp3_plus3_storage_path"):
             await delete_object(client, "job-artifacts", row.get(field))
         rpc = await client.post(
             f"{base}/rest/v1/rpc/delete_own_song",

@@ -136,7 +136,7 @@ async def list_songs(identity: Annotated[dict, Depends(current_user)]) -> list[d
             params={
                 "user_id": f"eq.{user_id}",
                 "status": "in.(completed,failed)",
-                "select": "id,project_id,status,progress,model_slug,error_message,created_at,completed_at",
+                "select": "id,project_id,status,progress,model_slug,error_message,created_at,completed_at,selected_pitch",
                 "order": "created_at.desc", "limit": "100",
             },
         )

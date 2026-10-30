@@ -1,6 +1,6 @@
 """Server-only generation reservation and authenticated worker dispatch."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 import httpx
@@ -17,6 +17,10 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 class CreateJobRequest(BaseModel):
     project_id: str = Field(pattern=r"^[0-9a-fA-F-]{36}$")
     model_slug: str = Field(default="my-voice-model", pattern=r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+
+
+class SelectPitchRequest(BaseModel):
+    pitch: Literal[-3, 0, 3]
 
 
 async def owned_job(client: httpx.AsyncClient, job_id: str, user_id: str, fields: str) -> dict:
@@ -326,7 +330,7 @@ async def continue_final_mix(
     async with httpx.AsyncClient(timeout=60) as client:
         job = await owned_job(
             client, job_id, user_id,
-            "id,status,instrumental_storage_path,converted_vocals_storage_path",
+            "id,status,instrumental_storage_path,converted_vocals_storage_path,converted_vocals_minus3_storage_path,converted_vocals_plus3_storage_path",
         )
         if job["status"] != "converted":
             raise HTTPException(409, "This job is not ready for final mixing")
@@ -338,6 +342,8 @@ async def continue_final_mix(
                     "job_id": job_id, "user_id": user_id,
                     "instrumental_storage_path": job["instrumental_storage_path"],
                     "converted_vocals_storage_path": job["converted_vocals_storage_path"],
+                    "converted_vocals_minus3_storage_path": job["converted_vocals_minus3_storage_path"],
+                    "converted_vocals_plus3_storage_path": job["converted_vocals_plus3_storage_path"],
                 },
             )
         except httpx.RequestError:
@@ -357,20 +363,62 @@ async def final_artifacts(
     async with httpx.AsyncClient(timeout=30) as client:
         job = await owned_job(
             client, job_id, user_id,
-            "id,status,final_wav_storage_path,final_mp3_storage_path",
+            "id,status,selected_pitch,final_wav_storage_path,final_mp3_storage_path,final_mp3_minus3_storage_path,final_mp3_plus3_storage_path",
         )
         if job["status"] != "completed":
             raise HTTPException(409, "Final song is not ready")
-        output = {}
-        for label, field in (("wav_url", "final_wav_storage_path"), ("mp3_url", "final_mp3_storage_path")):
+        output = {"selected_pitch": job.get("selected_pitch", 0), "variants": []}
+        signed_urls = {}
+        artifacts = (
+            ("wav_url", "final_wav_storage_path"),
+            ("mp3_url", "final_mp3_storage_path"),
+            ("minus3_url", "final_mp3_minus3_storage_path"),
+            ("plus3_url", "final_mp3_plus3_storage_path"),
+        )
+        for label, field in artifacts:
             path = job.get(field)
-            if not path:
+            if not path and field in {"final_wav_storage_path", "final_mp3_storage_path"}:
                 raise HTTPException(500, "Final artifact is missing")
+            if not path:
+                continue
             signed = await client.post(
                 f"{base}/storage/v1/object/sign/job-artifacts/{quote(path, safe='/')}",
                 headers=service_headers(), json={"expiresIn": 900},
             )
             if signed.status_code != 200 or not signed.json().get("signedURL"):
                 raise HTTPException(503, "Unable to authorize final song")
-            output[label] = f"{base}/storage/v1{signed.json()['signedURL']}"
+            signed_urls[label] = f"{base}/storage/v1{signed.json()['signedURL']}"
+        output.update(signed_urls)
+        for pitch, label, name in ((0, "mp3_url", "Default"), (-3, "minus3_url", "Deep"), (3, "plus3_url", "High")):
+            if label in signed_urls:
+                output["variants"].append({"pitch": pitch, "label": name, "mp3_url": signed_urls[label]})
     return output
+
+
+@router.post("/{job_id}/selected-pitch")
+async def select_pitch(
+    job_id: str,
+    request: SelectPitchRequest,
+    identity: Annotated[dict, Depends(current_user)],
+) -> dict:
+    if request.pitch not in {-3, 0, 3}:
+        raise HTTPException(422, "Pitch must be -3, 0 or +3")
+    user_id = identity["user"]["id"]
+    base = settings.supabase_url.rstrip("/")
+    async with httpx.AsyncClient(timeout=20) as client:
+        job = await owned_job(
+            client, job_id, user_id,
+            "id,status,final_mp3_storage_path,final_mp3_minus3_storage_path,final_mp3_plus3_storage_path",
+        )
+        field = {-3: "final_mp3_minus3_storage_path", 0: "final_mp3_storage_path", 3: "final_mp3_plus3_storage_path"}[request.pitch]
+        if job["status"] != "completed" or not job.get(field):
+            raise HTTPException(409, "This pitch version is not ready")
+        result = await client.patch(
+            f"{base}/rest/v1/generation_jobs",
+            headers={**service_headers(), "Prefer": "return=representation"},
+            params={"id": f"eq.{job_id}", "user_id": f"eq.{user_id}", "select": "id,selected_pitch"},
+            json={"selected_pitch": request.pitch},
+        )
+    if result.status_code != 200 or not result.json():
+        raise HTTPException(503, "Unable to save your selected version")
+    return result.json()[0]

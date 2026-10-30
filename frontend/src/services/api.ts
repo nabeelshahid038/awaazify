@@ -56,6 +56,15 @@ export type GenerationJob = {
   created_at: string;
   updated_at: string;
 };
+export type PitchVariant = { pitch: -3 | 0 | 3; label: string; mp3_url: string };
+export type FinalArtifacts = {
+  wav_url: string;
+  mp3_url: string;
+  minus3_url?: string;
+  plus3_url?: string;
+  selected_pitch: -3 | 0 | 3;
+  variants: PitchVariant[];
+};
 export type VoiceModel = {
   slug: string;
   display_name: string;
@@ -83,6 +92,7 @@ export type LibrarySong = {
   title: string;
   source_type: "upload" | "youtube" | null;
   duration_seconds: number | null;
+  selected_pitch: -3 | 0 | 3;
 };
 export type PaymentMethod = "easypaisa" | "jazzcash";
 export type CreditProduct = "song" | "voice_training";
@@ -269,10 +279,16 @@ export function continueFinalMix(token: string, jobId: string) {
   }>(`/api/v1/jobs/${jobId}/mix`, token, { method: "POST" }, 70000);
 }
 export function fetchFinalArtifacts(token: string, jobId: string) {
-  return apiJson<{ wav_url: string; mp3_url: string }>(
+  return apiJson<FinalArtifacts>(
     `/api/v1/jobs/${jobId}/artifacts`,
     token,
   );
+}
+export function selectSongPitch(token: string, jobId: string, pitch: -3 | 0 | 3) {
+  return apiJson<{id:string;selected_pitch:-3|0|3}>(`/api/v1/jobs/${jobId}/selected-pitch`, token, {
+    method: "POST",
+    body: JSON.stringify({pitch}),
+  });
 }
 export function fetchGenerationJobs(token: string) {
   return apiJson<GenerationJob[]>("/api/v1/jobs", token);

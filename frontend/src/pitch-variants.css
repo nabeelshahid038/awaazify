@@ -1,0 +1,5 @@
+.song-variants{grid-column:2/-1;display:flex!important;gap:8px!important;flex-wrap:wrap}
+.song-variants button{border:1px solid #dfe3e9;background:#f6f7f9;color:#555d69;border-radius:999px;padding:8px 12px;display:flex;align-items:center;gap:6px;font-weight:800}
+.song-variants button.active{border-color:#7046df;background:#eee9ff;color:#5d38c8}
+.song-variants button small{margin:0;color:inherit}
+@media(max-width:700px){.song-variants{grid-column:1/-1}}

@@ -15,8 +15,11 @@ Users upload an audio file, choose an available voice, start a private cloud-pro
 - Responsive audio-upload studio with a six-minute limit
 - Public and private AI voice catalogue with demo audio
 - Demucs vocal separation and Applio/RVC voice conversion
+- Three true Applio/RVC conversions per generation: Default (0), Deep (-3), and High (+3) pitch
+- Balanced final mix with instrumental at 80% and converted vocal at 100%
 - Private cloud job processing with progress and retry states
 - Permanent private song library with preview and MP3 download
+- One-credit generation with saved preferred version and access to all three variants
 - Custom voice-training request and admin review workflow
 - Admin tools for payments, credits, voices, training, support, and diagnostics
 - Rate limiting, Row Level Security, private storage, and automatic credit refunds on processing failures

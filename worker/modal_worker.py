@@ -72,8 +72,12 @@ def artifact_paths(user_id: str, job_id: str) -> dict[str, str]:
         "vocals": f"{root}/vocals.wav",
         "instrumental": f"{root}/instrumental.wav",
         "converted": f"{root}/converted-vocals.wav",
+        "converted_minus3": f"{root}/converted-vocals-minus-3.wav",
+        "converted_plus3": f"{root}/converted-vocals-plus-3.wav",
         "final_wav": f"{root}/final-mix.wav",
         "final_mp3": f"{root}/final-mix.mp3",
+        "final_mp3_minus3": f"{root}/final-mix-minus-3.mp3",
+        "final_mp3_plus3": f"{root}/final-mix-plus-3.mp3",
     }
 
 
@@ -184,6 +188,8 @@ class MixFinalRequest(BaseModel):
     user_id: str = Field(pattern=r"^[0-9a-fA-F-]{36}$")
     instrumental_storage_path: str = Field(min_length=10, max_length=1000)
     converted_vocals_storage_path: str = Field(min_length=10, max_length=1000)
+    converted_vocals_minus3_storage_path: str = Field(min_length=10, max_length=1000)
+    converted_vocals_plus3_storage_path: str = Field(min_length=10, max_length=1000)
 
 
 def authorize(value: str | None) -> None:
@@ -465,7 +471,7 @@ def prepare_audio(payload: dict[str, Any]) -> None:
     gpu="T4",
     cpu=4,
     memory=16384,
-    timeout=1800,
+    timeout=3600,
     # The complete GPU pipeline runs in one invocation. A short warm window
     # avoids paying for two idle minutes after every low-traffic request.
     scaledown_window=15,
@@ -518,32 +524,46 @@ def convert_voice(payload: dict[str, Any]) -> None:
                 instrumental_storage_path=instrumental_path,
             )
 
-            converted = temp_dir / "converted-vocals.wav"
-            subprocess.run(
-                build_rvc_command(
-                    vocals, converted, checkpoint_path, index_path,
-                    request.pitch, request.index_rate, request.protect,
-                ),
-                cwd="/opt/applio",
-                check=True,
-                timeout=900,
-            )
-            converted_path = paths["converted"]
-            upload_artifact(converted_path, converted)
+            converted_outputs = {
+                0: (temp_dir / "converted-vocals.wav", paths["converted"]),
+                -3: (temp_dir / "converted-vocals-minus-3.wav", paths["converted_minus3"]),
+                3: (temp_dir / "converted-vocals-plus-3.wav", paths["converted_plus3"]),
+            }
+            for position, pitch in enumerate((0, -3, 3), start=1):
+                converted_file, converted_path = converted_outputs[pitch]
+                subprocess.run(
+                    build_rvc_command(
+                        vocals, converted_file, checkpoint_path, index_path,
+                        pitch, request.index_rate, request.protect,
+                    ),
+                    cwd="/opt/applio",
+                    check=True,
+                    timeout=1200,
+                )
+                upload_artifact(converted_path, converted_file)
+                update_job(
+                    request.job_id,
+                    request.user_id,
+                    "converting",
+                    50 + position * 8,
+                    f"Applio RVC pitch {pitch:+d} conversion completed ({position}/3)",
+                )
             update_job(
                 request.job_id,
                 request.user_id,
                 "converted",
                 75,
-                "RVC voice conversion completed and stored privately",
-                converted_vocals_storage_path=converted_path,
+                "Applio RVC conversions completed at 0, -3 and +3 pitch",
+                converted_vocals_storage_path=converted_outputs[0][1],
+                converted_vocals_minus3_storage_path=converted_outputs[-3][1],
+                converted_vocals_plus3_storage_path=converted_outputs[3][1],
                 conversion_settings={
                     "engine": "applio",
                     "engine_release": "3.6.5",
                     "separator": "htdemucs",
                     "f0_method": "rmvpe",
                     "embedder": "contentvec",
-                    "pitch": request.pitch,
+                    "pitch_variants": [0, -3, 3],
                     "index_rate": request.index_rate,
                     "protect": request.protect,
                 },
@@ -553,7 +573,9 @@ def convert_voice(payload: dict[str, Any]) -> None:
                     job_id=request.job_id,
                     user_id=request.user_id,
                     instrumental_storage_path=instrumental_path,
-                    converted_vocals_storage_path=converted_path,
+                    converted_vocals_storage_path=converted_outputs[0][1],
+                    converted_vocals_minus3_storage_path=converted_outputs[-3][1],
+                    converted_vocals_plus3_storage_path=converted_outputs[3][1],
                 ).model_dump()
             )
     except Exception as exc:
@@ -581,12 +603,14 @@ def claim_converted_job(request: MixFinalRequest) -> bool:
 
 @app.function(image=media_image, secrets=[secret], timeout=900, cpu=2, memory=4096)
 def mix_final(payload: dict[str, Any]) -> None:
-    """Mix converted vocals with accompaniment and persist WAV plus MP3."""
+    """Mix the three independently generated Applio/RVC vocal variants."""
     request = MixFinalRequest.model_validate(payload)
     paths = artifact_paths(request.user_id, request.job_id)
     if (
         request.instrumental_storage_path != paths["instrumental"]
         or request.converted_vocals_storage_path != paths["converted"]
+        or request.converted_vocals_minus3_storage_path != paths["converted_minus3"]
+        or request.converted_vocals_plus3_storage_path != paths["converted_plus3"]
     ):
         fail_and_refund(request.job_id, "invalid_mix_path", "Final mix artifact path is invalid")
         return
@@ -596,38 +620,53 @@ def mix_final(payload: dict[str, Any]) -> None:
         with tempfile.TemporaryDirectory(prefix="awaazify-mix-") as temp:
             temp_dir = Path(temp)
             instrumental = temp_dir / "instrumental.wav"
-            converted = temp_dir / "converted-vocals.wav"
-            final_wav = temp_dir / "final-mix.wav"
-            final_mp3 = temp_dir / "final-mix.mp3"
+            converted_inputs = {
+                0: temp_dir / "converted-vocals.wav",
+                -3: temp_dir / "converted-vocals-minus-3.wav",
+                3: temp_dir / "converted-vocals-plus-3.wav",
+            }
+            outputs = {
+                0: (temp_dir / "final-mix.wav", temp_dir / "final-mix.mp3"),
+                -3: (temp_dir / "final-mix-minus-3.wav", temp_dir / "final-mix-minus-3.mp3"),
+                3: (temp_dir / "final-mix-plus-3.wav", temp_dir / "final-mix-plus-3.mp3"),
+            }
             download_artifact(request.instrumental_storage_path, instrumental)
-            download_artifact(request.converted_vocals_storage_path, converted)
-            subprocess.run(
-                [
-                    "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
-                    "-i", str(instrumental), "-i", str(converted),
-                    "-filter_complex",
-                    "[0:a]volume=1.0[a0];[1:a]volume=1.0[a1];"
-                    "[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0,"
-                    "alimiter=limit=0.95,loudnorm=I=-14:TP=-1:LRA=11[out]",
-                    "-map", "[out]", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le",
-                    str(final_wav),
-                ],
-                check=True, timeout=600,
-            )
-            subprocess.run(
-                [
-                    "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
-                    "-i", str(final_wav), "-c:a", "libmp3lame", "-b:a", "192k", str(final_mp3),
-                ],
-                check=True, timeout=300,
-            )
-            upload_artifact(paths["final_wav"], final_wav)
-            upload_artifact(paths["final_mp3"], final_mp3, "audio/mpeg")
+            download_artifact(request.converted_vocals_storage_path, converted_inputs[0])
+            download_artifact(request.converted_vocals_minus3_storage_path, converted_inputs[-3])
+            download_artifact(request.converted_vocals_plus3_storage_path, converted_inputs[3])
+            for pitch, (final_wav, final_mp3) in outputs.items():
+                subprocess.run(
+                    [
+                        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+                        "-i", str(instrumental), "-i", str(converted_inputs[pitch]),
+                        "-filter_complex",
+                        "[0:a]volume=0.80[a0];[1:a]volume=1.0[a1];"
+                        "[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0,"
+                        "alimiter=limit=0.95,loudnorm=I=-14:TP=-1:LRA=11[out]",
+                        "-map", "[out]", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le",
+                        str(final_wav),
+                    ],
+                    check=True, timeout=600,
+                )
+                subprocess.run(
+                    [
+                        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+                        "-i", str(final_wav), "-c:a", "libmp3lame", "-b:a", "192k", str(final_mp3),
+                    ],
+                    check=True, timeout=300,
+                )
+            upload_artifact(paths["final_wav"], outputs[0][0])
+            upload_artifact(paths["final_mp3"], outputs[0][1], "audio/mpeg")
+            upload_artifact(paths["final_mp3_minus3"], outputs[-3][1], "audio/mpeg")
+            upload_artifact(paths["final_mp3_plus3"], outputs[3][1], "audio/mpeg")
             update_job(
                 request.job_id, request.user_id, "completed", 100,
-                "Final WAV and MP3 completed and stored privately",
+                "Default, -3 and +3 pitch versions completed with 80% instrumental mix",
                 final_wav_storage_path=paths["final_wav"],
                 final_mp3_storage_path=paths["final_mp3"],
+                final_mp3_minus3_storage_path=paths["final_mp3_minus3"],
+                final_mp3_plus3_storage_path=paths["final_mp3_plus3"],
+                selected_pitch=0,
                 completed_at=datetime.now(timezone.utc).isoformat(),
             )
     except Exception as exc:
